@@ -232,6 +232,12 @@ naming the category.
   mechanism is wrong, any row without a witness, and any sum that
   doesn't reconcile must be fixed before shipping. This pass is what
   graders deduct for — run it first, don't wait to be caught.
+- **Unwitnessed-member sweep (mandatory):** every ledger member
+  must resolve to a test witness OR carry an explicit `unwitnessed:`
+  reason in the ledger (e.g. `dead-code`, `env-gated`, `defect-flag`).
+  Rejected-defect candidates get a §5 row even when rejected — a
+  disposition is a verdict, not silence. An enumerated member that is
+  neither witnessed nor justified is a hole, not an omission.
 - **Final self-verification pass (mandatory before reporting done):**
   re-run the suite and verify every claim against reality —
   (a) pytest result == reported/metrics counts;

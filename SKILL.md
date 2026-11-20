@@ -32,6 +32,15 @@ One of:
 
 # Pipeline
 
+## Phase 0 — Scope & delegation gate (do this FIRST)
+Count the public units in scope. **> ~15 → you MUST
+decompose with subagents** (or the simulate fallback:
+per-module model files to disk, one unit per pass) — see
+"Scaling with subagents" below. Write the count and the
+delegation decision into journal.txt before any other
+work. Skipping this gate is how large surfaces lose
+clauses and get "scope cut" mid-run.
+
 ## Phase 1 — Inventory
 - Python: run `scripts/analyze_repo.py <src_dir> --json analysis.json`.
   It lists every public unit with params+annotations, cyclomatic
@@ -649,21 +658,30 @@ TEST_DESIGN.md sections (all required, `- (none)` when empty):
 6. Self-review (the checklist below, answered)
 
 # Scaling with subagents — MANDATORY for large projects
-- Small repo (< ~15 public units): do it inline.
-- Anything larger: you MUST decompose with subagents. After Phases
-  1-2 (the requirements model is global — one mind builds it), spawn
-  ONE subagent per module/cluster with: the relevant slice of the
-  requirements model, the category files needed, and the output spec.
-  You integrate their test files and run verification yourself.
-- Also use a subagent for any module whose source exceeds your
-  comfortable reading size — incomplete reads produce incomplete
-  models.
-- Never split the requirements model across agents — inconsistent
-  models produce inconsistent tests.
-- If your harness exposes a subagent mechanism (delegate_task,
-  run_subagent, Agent tool), use it; if none exists, simulate by
-  processing one module per pass and writing intermediate model
-  files to disk so no module's detail is ever dropped.
+**PHASE-0 GATE — decide before Phase 1.** Count the public
+units in scope. Small repo (< ~15 public units): inline.
+**Anything larger: you MUST decompose — this is not
+optional.** Trying to hold a 30+-unit surface in one
+context is how clauses get dropped, sweeps get truncated,
+and whole units get "scope cut." Evaluate the size FIRST,
+write the decision + unit count into journal.txt, then:
+- Decompose: after Phases 1-2 (requirements model is
+  global — one mind builds it), spawn ONE subagent per
+  module/cluster with its model slice + output spec. You
+  integrate their test files and run verification.
+- If your harness exposes a subagent mechanism
+  (delegate_task, run_subagent, Agent tool), use it.
+  **If none exists, you MUST simulate:** process one
+  module per pass and write per-module intermediate
+  model files to disk (`model/<unit>.txt` — clauses,
+  dispositions, probe results) so no module's detail is
+  dropped when context compresses. One giant in-context
+  model is the failure this rule exists to prevent.
+- Also use a subagent/pass for any module whose source
+  exceeds your comfortable reading size — incomplete
+  reads produce incomplete models.
+- Never split the requirements model across agents —
+  inconsistent models produce inconsistent tests.
 
 # Python/Java notes
 - Python: prefer `pytest.mark.parametrize` over loops of test

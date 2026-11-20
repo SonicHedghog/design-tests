@@ -232,6 +232,15 @@ naming the category.
   mechanism is wrong, any row without a witness, and any sum that
   doesn't reconcile must be fixed before shipping. This pass is what
   graders deduct for — run it first, don't wait to be caught.
+- **Pin-vs-flag discipline:** a written clause the impl
+  contradicts is ALWAYS a flag door, never a green pin.
+  "Spec-silent" describes an absent contract, not a
+  violated one — pinning a written-clause violation
+  green is evasion, not characterization. You may ALSO
+  pin the observed behavior alongside the flag (flag the
+  dead clause AND pin what it does), but the flag is
+  mandatory. Reserve spec-silent pins for inputs the
+  docs truly don't cover.
 - **Defect-family completeness (mandatory):** when a divergence
   mechanism is found on one input, enumerate EVERY input in scope
   that reaches the same mechanism — sibling sites (same defect in a

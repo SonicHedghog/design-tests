@@ -242,6 +242,20 @@ naming the category.
   the clause isn't actually there. A clause dropped from the
   model is a guaranteed recall miss — you can't flag what
   you never wrote down.
+- **Pin-proof (mandatory before shipping):** for EVERY
+  spec-silent pin, fold, or observed-behavior witness on a
+  divergence, you must first TRY to write the conforming
+  flag (`assert documented_contract(input)`). If it fails,
+  that IS the defect flag — ship it. A pin is only legal
+  after a documented proof that no conforming assertion is
+  possible: the clause is provably absent (quote where it
+  would live), or the divergence is impl-consistent and
+  doc-consistent on every reading. "Inverted oracle",
+  "design gap", "can't assert a crash" and "the doc is
+  ambiguous" are not proof — ambiguity means flag both
+  readings, not pin the convenient one. A run that ships
+  zero flags on code with known divergent behavior has
+  laundered the defects, not characterized them.
 - **Pin-vs-flag discipline:** a written clause the impl
   contradicts is ALWAYS a flag door, never a green pin.
   "Spec-silent" describes an absent contract, not a

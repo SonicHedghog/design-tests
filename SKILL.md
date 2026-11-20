@@ -222,6 +222,16 @@ naming the category.
   matrix consumers too — bump/convert/format/normalize ops
   consume fields and must appear in the field×consumer matrix
   or their field-edge members go unenumerated.
+- **Independent disposition audit (mandatory, after self-verification):**
+  the author CANNOT audit their own judgments. Before delivery, re-verify
+  every §5 disposition with fresh eyes — probe each spec-silent pin
+  against the source (run it), re-run mental-fix on every green pin,
+  check no flag asserts what a pin calls conforming, confirm every §5
+  row carries a VERBATIM quote (any doc format), and RE-SUM the ledger
+  budget arithmetic instead of claim-matching. Any pin whose stated
+  mechanism is wrong, any row without a witness, and any sum that
+  doesn't reconcile must be fixed before shipping. This pass is what
+  graders deduct for — run it first, don't wait to be caught.
 - **Final self-verification pass (mandatory before reporting done):**
   re-run the suite and verify every claim against reality —
   (a) pytest result == reported/metrics counts;

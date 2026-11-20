@@ -232,6 +232,15 @@ naming the category.
   mechanism is wrong, any row without a witness, and any sum that
   doesn't reconcile must be fixed before shipping. This pass is what
   graders deduct for — run it first, don't wait to be caught.
+- **Defect-family completeness (mandatory):** when a divergence
+  mechanism is found on one input, enumerate EVERY input in scope
+  that reaches the same mechanism — sibling sites (same defect in a
+  different function/branch), sibling parameters (a flag that only
+  crashes when combined with another arg), and sibling classes of
+  the input (zero, empty, null, negative variants of the triggering
+  type). A defect family witnessed on one input but silent on its
+  siblings is a recall miss — each uncovered sibling is an
+  unenumerated door, not a fold.
 - **Unwitnessed-member sweep (mandatory):** every ledger member
   must resolve to a test witness OR carry an explicit `unwitnessed:`
   reason in the ledger (e.g. `dead-code`, `env-gated`, `defect-flag`).

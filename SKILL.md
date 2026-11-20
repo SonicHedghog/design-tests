@@ -232,6 +232,16 @@ naming the category.
   mechanism is wrong, any row without a witness, and any sum that
   doesn't reconcile must be fixed before shipping. This pass is what
   graders deduct for — run it first, don't wait to be caught.
+- **Clause inventory (mandatory, before designing tests):**
+  list EVERY testable clause of EVERY in-scope public API's
+  docs verbatim — each @param contract, @return shape,
+  @throws clause, "must"/"always"/"never" statement, example,
+  and boundary claim. One line per clause, tagged [clause].
+  The requirements model must trace every clause → witness
+  test OR defect flag OR an explicit `absent:` quote showing
+  the clause isn't actually there. A clause dropped from the
+  model is a guaranteed recall miss — you can't flag what
+  you never wrote down.
 - **Pin-vs-flag discipline:** a written clause the impl
   contradicts is ALWAYS a flag door, never a green pin.
   "Spec-silent" describes an absent contract, not a

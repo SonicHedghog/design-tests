@@ -242,6 +242,20 @@ naming the category.
   the clause isn't actually there. A clause dropped from the
   model is a guaranteed recall miss — you can't flag what
   you never wrote down.
+- **Parameter-extremes sweep (mandatory):** when a function or
+  constructor takes a config/parameter object, enumerate its
+  extreme and degenerate values and probe each — empty
+  collections, single-element collections, weight/multiplier
+  values ≠ 1 at every significant position, minimum and
+  maximum legal values, values that disable a feature, and
+  combinations that make two code paths disagree. Probing
+  only the "safe default" (e.g. weights `{1}`) is a recall
+  hole: a defect that only manifests at a non-default
+  parameter value is invisible until you instantiate it.
+  If a parameter creates a round-trip relationship
+  (calculate→validate, encode→decode, put→get), probe the
+  round trip at every non-default config, not just the one
+  where it happens to hold.
 - **Pin-proof (mandatory before shipping):** for EVERY
   spec-silent pin, fold, or observed-behavior witness on a
   divergence, you must first TRY to write the conforming

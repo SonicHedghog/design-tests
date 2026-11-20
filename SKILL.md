@@ -33,13 +33,17 @@ One of:
 # Pipeline
 
 ## Phase 0 — Scope & delegation gate (do this FIRST)
-Count the public units in scope. **> ~15 → you MUST
-decompose with subagents** (or the simulate fallback:
-per-module model files to disk, one unit per pass) — see
-"Scaling with subagents" below. Write the count and the
-delegation decision into journal.txt before any other
-work. Skipping this gate is how large surfaces lose
-clauses and get "scope cut" mid-run.
+Estimate whether the full source + docs of the in-scope
+surface will COMFORTABLY fit in your context alongside the
+requirements model, ledger, and test code you'll write.
+(~15 public units is a rough proxy; a dense 12-unit
+module can fail this test.) If it won't fit: **you MUST
+delegate the heavy work to subagents** — see "Scaling
+with subagents" below — because a single context that
+overflows silently drops clauses, truncates sweeps, and
+"scope cuts" defect-bearing units. Record the size
+estimate and delegation decision in journal.txt before
+any other work.
 
 ## Phase 1 — Inventory
 - Python: run `scripts/analyze_repo.py <src_dir> --json analysis.json`.
@@ -657,29 +661,30 @@ TEST_DESIGN.md sections (all required, `- (none)` when empty):
 5. Suspected defects (spec-vs-impl divergences found by the suite)
 6. Self-review (the checklist below, answered)
 
-# Scaling with subagents — MANDATORY for large projects
-**PHASE-0 GATE — decide before Phase 1.** Count the public
-units in scope. Small repo (< ~15 public units): inline.
-**Anything larger: you MUST decompose — this is not
-optional.** Trying to hold a 30+-unit surface in one
-context is how clauses get dropped, sweeps get truncated,
-and whole units get "scope cut." Evaluate the size FIRST,
-write the decision + unit count into journal.txt, then:
-- Decompose: after Phases 1-2 (requirements model is
-  global — one mind builds it), spawn ONE subagent per
-  module/cluster with its model slice + output spec. You
-  integrate their test files and run verification.
+# Scaling with subagents — offload or lose detail
+When Phase 0 says the surface won't fit your context,
+treat subagents as your working memory: each module gets
+a FRESH context so nothing competes for attention, and
+its detail arrives back as a compact artifact, not a
+pile of source you'd have to re-read.
+- Build the requirements model yourself (it's global —
+  one mind), then spawn ONE subagent per module/cluster
+  with: its model slice, the category files needed, the
+  output spec, and the bans. It returns test files +
+  a probe/disposition report. You integrate and run
+  verification yourself.
+- Good offloads: module probing + test generation,
+  empirical divergence probing, checker runs. Keep
+  orchestrator-only: the requirements model, ledger,
+  defect dispositions, cross-module analysis, grading.
 - If your harness exposes a subagent mechanism
   (delegate_task, run_subagent, Agent tool), use it.
-  **If none exists, you MUST simulate:** process one
-  module per pass and write per-module intermediate
-  model files to disk (`model/<unit>.txt` — clauses,
-  dispositions, probe results) so no module's detail is
-  dropped when context compresses. One giant in-context
-  model is the failure this rule exists to prevent.
-- Also use a subagent/pass for any module whose source
-  exceeds your comfortable reading size — incomplete
-  reads produce incomplete models.
+  **If none exists, you MUST simulate the same
+  pattern:** one module per pass, per-module model files
+  to disk (`model/<unit>.txt` — clauses, dispositions,
+  probe results) so detail survives context compression.
+  One giant in-context model is the failure this exists
+  to prevent — a truncated sweep reads as a recall miss.
 - Never split the requirements model across agents —
   inconsistent models produce inconsistent tests.
 

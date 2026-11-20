@@ -238,6 +238,13 @@ naming the category.
   Rejected-defect candidates get a §5 row even when rejected — a
   disposition is a verdict, not silence. An enumerated member that is
   neither witnessed nor justified is a hole, not an omission.
+- **Compile-and-run gate (mandatory before ANY claims):** the
+  delivered suite must compile and run exactly as shipped, with the
+  documented command, in a clean environment. If the journal reports
+  pass/fail counts, they must be reproducible from a fresh checkout —
+  no scratch fixes, no hand-patched intermediates, no "it worked in my
+  earlier attempt." A suite that doesn't compile as shipped fails
+  executability outright regardless of test quality.
 - **Final self-verification pass (mandatory before reporting done):**
   re-run the suite and verify every claim against reality —
   (a) pytest result == reported/metrics counts;

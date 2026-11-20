@@ -270,6 +270,17 @@ naming the category.
   readings, not pin the convenient one. A run that ships
   zero flags on code with known divergent behavior has
   laundered the defects, not characterized them.
+- **Pin-proof evidence (§5 mandatory):** every §5 pin/fold
+  row must cite the conforming-flag attempt it survived —
+  the exact assertion tried and its actual outcome
+  (e.g. "tried `assert between(None) is True` → got
+  ValidationError"). If a row has no cited attempt, it is
+  an unproven pin and must be upgraded to a flag before
+  shipping. A zero-flag run on code with any documented
+  clause is a red flag in itself: prove in §5 that every
+  single clause was tried and passed, or the run is
+  laundered. This is a checklist item in self-review, not
+  a judgment call.
 - **Pin-vs-flag discipline:** a written clause the impl
   contradicts is ALWAYS a flag door, never a green pin.
   "Spec-silent" describes an absent contract, not a

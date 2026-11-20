@@ -242,6 +242,15 @@ naming the category.
   the clause isn't actually there. A clause dropped from the
   model is a guaranteed recall miss — you can't flag what
   you never wrote down.
+- **Scope-closure ban:** you may NOT narrow scope below all
+  in-scope public units/classes of the assigned surface.
+  Dropping a whole class, package, or function family
+  because it "looks simple" or is "dependency surface" is
+  a recall hole — defect-bearing units hide exactly where
+  it seems cheapest to skip them. A documented exclusion
+  is only legal when a unit is genuinely untestable
+  (missing external dep, requires network) and you must
+  record the reason verbatim in the journal.
 - **Parameter-extremes sweep (mandatory):** when a function or
   constructor takes a config/parameter object, enumerate its
   extreme and degenerate values and probe each — empty

@@ -687,6 +687,14 @@ pile of source you'd have to re-read.
   to prevent — a truncated sweep reads as a recall miss.
 - Never split the requirements model across agents —
   inconsistent models produce inconsistent tests.
+- **Re-proof delegated pins (orchestrator duty):** a pin
+  or observed-behavior disposition a subagent returns is
+  a CLAIM, not a disposition. Before shipping, you must
+  re-run the conforming-flag attempt on every delegated
+  divergence yourself — subagent pins arrive without
+  proof and will launder defects if integrated as-is.
+  The pin-proof + evidence rules apply to delegated
+  artifacts exactly as if you wrote them.
 
 # Python/Java notes
 - Python: prefer `pytest.mark.parametrize` over loops of test

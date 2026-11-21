@@ -695,6 +695,14 @@ pile of source you'd have to re-read.
   proof and will launder defects if integrated as-is.
   The pin-proof + evidence rules apply to delegated
   artifacts exactly as if you wrote them.
+- **Delegation checkpoint (orchestrator duty):** when a
+  delegate dies or ends early, reconcile its EXPECTED
+  deliverables before shipping: every module it owned
+  must land as real tests + dispositions, or its gap is
+  logged verbatim in the journal. A flag or clause
+  reference with no test behind it is a phantom — hunt
+  them. `grep` for every FLAG-/D- id in the artifacts
+  and confirm a failing test exists for each.
 
 # Python/Java notes
 - Python: prefer `pytest.mark.parametrize` over loops of test

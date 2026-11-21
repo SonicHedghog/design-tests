@@ -213,6 +213,13 @@ naming the category.
   behavior green, run the MENTAL-FIX check: if the doc clause
   were implemented faithfully, would the pin still pass? A pin
   that would fail on the conforming implementation is a flag.
+  The label does not matter: "spec-silent", "ambiguous", and
+  "undocumented" all require the same test — a written clause
+  (docstring, Javadoc, docstring example, Returns/Raises
+  clause, param doc) that covers the input IS a contract, and
+  pinning a violation of it under ANY label is evasion.
+  Ambiguity goes to questions-for-maintainer, never to a green
+  assert.
   Reason against the VERBATIM doc wording only — never upgrade
   a paraphrase ("whitespace" for "spaces", "numeric" for
   "digits") into a stronger clause and pin against the upgrade.

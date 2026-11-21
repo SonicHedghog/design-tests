@@ -219,7 +219,15 @@ naming the category.
   clause, param doc) that covers the input IS a contract, and
   pinning a violation of it under ANY label is evasion.
   Ambiguity goes to questions-for-maintainer, never to a green
-  assert.
+  assert. The verdict must quote the STRONGEST covering
+  clause — quoting a permissive clause while a tighter one
+  goes unquoted is a favorable-quote evasion. Sibling doors
+  under one clause get ONE verdict kind: never flag a clause
+  at one site and pin its violation at another. If ANY
+  plausible reading of a covering clause is contradicted, the
+  verdict is a flag; qfm may accompany but never replaces the
+  assert, and a qfm verdict must actually LAND in the
+  questions file before delivery.
   Reason against the VERBATIM doc wording only — never upgrade
   a paraphrase ("whitespace" for "spaces", "numeric" for
   "digits") into a stronger clause and pin against the upgrade.
@@ -355,6 +363,18 @@ naming the category.
   (e) requirements rows re-checked against actual impl
   behavior, not assumed semantics;
   (f) budget == collected == ledger table sum.
+  (g) DIVERGENCE-CLOSURE sweep — walk the probe log and every
+  flag's evidence list; each probed divergence must terminate
+  in a named §5 verdict (flag/pin/qfm/fold). Splitting members
+  out of a flag never deletes their dispositions. Any green
+  assert whose expected literal IS a probed divergence is a
+  pin subject to full pin-proof, wherever it lives.
+  (h) UNFAILABLE-ASSERT sweep — an assert satisfied by every
+  value the signature permits (>= on guaranteed-sign, notNull
+  on non-nullable, try/catch smoke rows) witnesses nothing; a
+  unit whose every witness is unfailable is unwitnessed. This
+  binds delegated artifacts too — reconciliation checks
+  falsifiability, not file existence.
   A claim you cannot reproduce does not ship — fix the test
   or fix the claim.
 - **Cross-file literal-dup sweep:** after emission, diff each

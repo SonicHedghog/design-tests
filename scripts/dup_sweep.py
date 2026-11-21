@@ -9,10 +9,10 @@ case — is normalized to a signature:
   input set       every normalized call the case's executed body
                   invokes (SUT + fixtures), parametrize names resolved
                   to their row literals and `x = <expr>` assignments
-                  resolved to the expr — `parse(s)` on row "1.2.3" and
-                  `parse("1.2.3")` normalize identically, and
-                  `s.add(n)` where s = Stock(10, 0) matches
-                  `stock.add(n)` under the same ctor args
+                  resolved to the expr — `parse(s)` on row "a.b.c" and
+                  `parse("a.b.c")` normalize identically, and
+                  `s.add(n)` where s = Widget(10, 0) matches
+                  `w.add(n)` under the same ctor args
   assertion shape the body's oracle predicates:
                     raises(E[, match=lit]) on normalized call C
                     == / is    with the expected literal on one side

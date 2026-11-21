@@ -134,6 +134,10 @@ naming the category.
   projections: sign-of-comparisons ((r>0)-(r<0)) where the exact
   value is pinned, substring membership ("x" in out) where the exact
   output is pinned, truthiness smoke checks (is not None) as the
+  whole oracle; DISJUNCTIVE ORACLES — `assert A or B` where either
+  disjunct alone satisfies it (`x is expected or <raises-check>(x)`,
+  `ok(res) or True`): a disjunction admitting both conforming and
+  defective outcomes is unfailable by construction;
   whole assertion, any self-comparison including across assignments
   (res is f(x), repr(v)==repr(v)). Each hit must be rewritten or
   justified in TEST_DESIGN.
@@ -310,8 +314,8 @@ naming the category.
 - **Pin-proof evidence (§5 mandatory):** every §5 pin/fold
   row must cite the conforming-flag attempt it survived —
   the exact assertion tried and its actual outcome
-  (e.g. "tried `assert between(None) is True` → got
-  ValidationError"). If a row has no cited attempt, it is
+  (e.g. "tried `assert pred(None) is True` → got
+  SomeValidationError"). If a row has no cited attempt, it is
   an unproven pin and must be upgraded to a flag before
   shipping. A zero-flag run on code with any documented
   clause is a red flag in itself: prove in §5 that every
@@ -336,6 +340,28 @@ naming the category.
   type). A defect family witnessed on one input but silent on its
   siblings is a recall miss — each uncovered sibling is an
   unenumerated door, not a fold.
+- **Door census + breadth floor (mandatory, before flag depth):**
+  before minting any second member of a class or any flag, emit
+  the DOOR list for every in-scope unit — one row per
+  discriminating probe cell the unit's enumeration sources
+  imply (each clause-inventory row x discriminating members,
+  each guard site x member class, each variant that adds,
+  removes, or bypasses a check, each domain-edge member, each
+  deprecated/compat unit's contract probes). A door is
+  enumerated by its discriminating member, not by its unit:
+  a unit "covered" by green tests whose defect-bearing
+  members were never minted is UNWITNESSED — the ledger
+  reconciles members that exist, so a door nobody enumerated
+  is invisible to every join. Emit the per-unit door count in
+  TEST_DESIGN and resolve every row to witness, flag, pin,
+  qfm, or named hole. Ordering is breadth-first: a flag on
+  the Nth sibling member mints only after every enumerated
+  door has >=1 discriminating probe. When generation capacity
+  collapses (dead delegates, context pressure), the floor is
+  one discriminating probe per door across the WHOLE surface —
+  "representative" coverage of a subset is a scope cut. The
+  delegation checkpoint reconciles each module's DOOR census,
+  not just its deliverables.
 - **Unwitnessed-member sweep (mandatory):** every ledger member
   must resolve to a test witness OR carry an explicit `unwitnessed:`
   reason in the ledger (e.g. `dead-code`, `env-gated`, `defect-flag`).
@@ -375,6 +401,17 @@ naming the category.
   unit whose every witness is unfailable is unwitnessed. This
   binds delegated artifacts too — reconciliation checks
   falsifiability, not file existence.
+  (i) SECTION-INTEGRITY — every required section heading exists
+  and every §-reference cited anywhere resolves to a real heading;
+  a cited section that doesn't exist is a defect.
+  (j) COUNTS-INTEGRITY — re-run collection on shipped files and
+  diff every reported count (metrics, budget, ledger, journal);
+  stale counts, ghost tests, and phantom members are fixed or
+  disclosed before delivery — never claim-matched.
+  (k) CLAIMS-FROM-TOOLS — every self-review elimination claim
+  ("shape X removed", "all units witnessed") is produced by
+  re-running the check on shipped artifacts, not memory; a claim
+  that greps false is itself a defect.
   A claim you cannot reproduce does not ship — fix the test
   or fix the claim.
 - **Cross-file literal-dup sweep:** after emission, diff each
@@ -431,7 +468,15 @@ naming the category.
   but the fix wouldn't — bundling them into one flag destroys the
   differential signal (the flag fails on both impls and detects
   nothing). Flag the differential instances as their own test;
-  sibling residuals get separate flag entries. Flags MUST be
+  sibling residuals get separate flag entries. A flag's expected
+  value is DERIVED VERBATIM from the clause it cites — write the
+  literal the clause entails, not a plausible neighbor, and verify
+  before shipping that the assert would be TRUE under documented
+  behavior. A flag asserting a literal no documented reading
+  produces stays red on a conforming impl — a broken oracle that
+  detects nothing; a flag asserting behavior the docs explicitly
+  document is a false flag. Both are worse than a miss: they burn
+  flag budget and impeach every sibling flag. Flags MUST be
   plain failing assertions on the defective implementation: never
   xfail, skip, or expect-failure marks — packaging a violation as an
   expected outcome makes the suite report it as passing and
@@ -448,8 +493,20 @@ naming the category.
   flag must CITE a behavioral clause that ENTAILS the flag — the
   clause must actually forbid the observed behavior, not merely
   exist nearby. A return contract constrains successful returns
-  and says nothing about the raise surface; an observed raise type
-  is not a documented closed enumeration. If no clause entails the
+  and says nothing about the raise surface — FOR INPUTS OUTSIDE
+  ITS DOMAIN. A member inside the declared domain — including
+  null/empty/degenerate members of an unconstrained reference-
+  type parameter — is covered by the return contract: an
+  undocumented exception on it is a flag door, or qfm when
+  domain coverage is genuinely ambiguous — never a bare
+  expected-exception pin. "No @throws clause" is not proof of
+  silence. An expected-EXCEPTION assertion IS an expected
+  literal: every assertRaises/assertThrows row asserting an
+  exception the docs do not name for that input is a pin of
+  observed behavior and takes the full pin-proof (conforming-
+  flag attempt first, mental-fix, verbatim evidence). A pin
+  justified only by "the docs don't enumerate this exception"
+  is an unproven pin. If no clause entails the
   flag, disposition it as an ambiguity/design-gap, not a defect.
   Annotations,
   inferred domains, and conventions are non-citable: they inform

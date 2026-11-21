@@ -96,7 +96,7 @@ an **(input set, assertion-shape)** signature. The input set is every
 normalized operation the case's executed body invokes — calls,
 subscripts, operators — with parametrize names resolved to their row
 literals and simple `x = <expr>` assignments resolved (`parse(s)` on
-row `"1.2.3"` ≡ `parse("1.2.3")`; `f(*a)` with `a=(1,2,3)` ≡
+row `"a.b.c"` ≡ `parse("a.b.c")`; `f(*a)` with `a=(1,2,3)` ≡
 `f(1,2,3)`). The assertion shape is the body's oracle predicates:
 `raises(E[, match])`, `==`/`is` with the expected literal, `!=`,
 ordering comparisons, `in`/`not in`, `len()`/attribute chains, bare

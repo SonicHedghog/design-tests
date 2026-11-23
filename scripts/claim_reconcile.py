@@ -30,13 +30,22 @@ never a finding. A mismatch is a `claim-mismatch` finding. Also
 checks consistency between claimed pass+fail and claimed/measured
 collected when all three are known.
 
+Also audits the checker-evidence seal (r38 seal-mutation): a formal
+sealed_at+content_hash in metrics.json must match ledger.json + test
+files on disk (mismatch => FAIL), and no ledger/test/metrics file may
+postdate the seal (stale evidence => FAIL). A checkers block with no
+formal seal falls back to metrics.json's own mtime as seal time;
+a run with no seal at all earns a `seal-missing` warning only.
+
 Exit: 0 clean, 1 findings, 2 usage/fatal error.
 """
 import argparse
+import hashlib
 import json
 import os
 import re
 import sys
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
@@ -183,6 +192,139 @@ def metrics_truth(path):
     return out, None
 
 
+# ------------------------------------------------------------- seal-mutation
+# (r38: validators_r38 resealed metrics.json's checker evidence twice
+# mid-grading — the sealed checker outputs stopped matching the ledger,
+# tests, and journal on disk. A run's checker evidence must carry a
+# content seal; artifacts rewritten after the seal make it stale.)
+
+SEAL_TEST_DIRS = ("tests", "junit", "test")
+SEAL_MTIME_SLOP = 1.0   # seconds; filesystem granularity tolerance
+
+
+def _seal_field(metrics, key):
+    """Find `key` at metrics top level or inside a named evidence
+    object (seal/evidence/checker_evidence/checkers)."""
+    for obj in (metrics, metrics.get("seal"), metrics.get("evidence"),
+                metrics.get("checker_evidence"),
+                metrics.get("checkers")):
+        if isinstance(obj, dict) and obj.get(key) is not None:
+            return obj[key]
+    return None
+
+
+def _seal_artifacts(run_dir):
+    """ledger.json + every file under the run's test dirs — the
+    artifacts a checker-evidence seal covers."""
+    paths = [os.path.join(run_dir, "ledger.json")]
+    for d in SEAL_TEST_DIRS:
+        td = os.path.join(run_dir, d)
+        if not os.path.isdir(td):
+            continue
+        for root, dns, fns in os.walk(td):
+            dns[:] = [x for x in dns if x not in
+                      ("__pycache__", ".git", "target", "build")]
+            paths += [os.path.join(root, f) for f in fns]
+    return [p for p in paths if os.path.isfile(p)]
+
+
+def content_hash(run_dir):
+    """sha256 over the sealed corpus: sorted
+    'relpath\\0sha256(file bytes)\\n' lines for ledger.json + all test
+    files. Deterministic for a fixed tree; a byte changed anywhere
+    breaks the seal."""
+    entries = []
+    for p in _seal_artifacts(run_dir):
+        try:
+            with open(p, "rb") as fh:
+                digest = hashlib.sha256(fh.read()).hexdigest()
+        except OSError:
+            continue
+        entries.append(os.path.relpath(p, run_dir).replace("\\", "/")
+                       + "\0" + digest)
+    h = hashlib.sha256()
+    for e in sorted(entries):
+        h.update(e.encode())
+        h.update(b"\n")
+    return h.hexdigest()
+
+
+def audit_seal(run_dir, metrics_path, metrics):
+    """r38 seal-mutation audit. metrics.json's checkers-evidence block
+    is sealed when the run gates; evidence is stale when artifacts
+    were rewritten afterwards:
+
+      * formal seal present (sealed_at + content_hash): recompute the
+        hash over ledger.json + test files -> mismatch is FAIL; any
+        artifact (or metrics.json itself) newer than sealed_at is
+        FAIL — the evidence was resealed or the tree mutated after.
+      * checkers/checker_evidence block but no formal seal: the block
+        WAS sealed at metrics-write time; artifacts postdating
+        metrics.json's mtime => stale sealed outputs => FAIL. If
+        nothing postdates it, the absent formal seal is a WARN.
+      * no seal at all (legacy runs): WARN only.
+
+    Returns (findings, warnings) as (category, message) tuples."""
+    findings, warnings = [], []
+    sealed_at = _seal_field(metrics, "sealed_at")
+    sealed_hash = _seal_field(metrics, "content_hash")
+    artifacts = _seal_artifacts(run_dir)
+    if sealed_at is not None or sealed_hash is not None:
+        if sealed_at is not None:
+            try:
+                ts = datetime.fromisoformat(
+                    str(sealed_at).replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                ts = None
+                warnings.append(("seal-format",
+                                 f"sealed_at '{sealed_at}' is not an "
+                                 f"ISO timestamp"))
+            if ts is not None:
+                newer = [p for p in artifacts + [metrics_path]
+                         if os.path.getmtime(p) > ts + SEAL_MTIME_SLOP]
+                if newer:
+                    findings.append((
+                        "seal-mutation",
+                        f"{len(newer)} artifact(s) postdate the "
+                        f"sealed_at timestamp (e.g. "
+                        f"{os.path.relpath(newer[0], run_dir)}) — "
+                        f"ledger/tests/metrics rewritten after the "
+                        f"checker evidence was sealed"))
+        if sealed_hash is not None:
+            if content_hash(run_dir) != sealed_hash:
+                findings.append((
+                    "seal-mutation",
+                    "sealed content_hash does not match ledger.json + "
+                    "test files on disk — the sealed evidence no "
+                    "longer describes this run"))
+        return findings, warnings
+
+    has_evidence = isinstance(metrics.get("checkers"), dict) or \
+        metrics.get("checker_evidence") is not None
+    warnings.append(("seal-missing",
+                     "metrics.json carries no sealed_at/content_hash "
+                     "evidence seal"))
+    if not has_evidence:
+        return findings, warnings
+    # The embedded checker evidence was sealed at metrics-write time;
+    # artifacts newer than metrics.json itself postdate it.
+    try:
+        seal_time = os.path.getmtime(metrics_path)
+    except OSError:
+        return findings, warnings
+    newer = [p for p in artifacts
+             if os.path.getmtime(p) > seal_time + SEAL_MTIME_SLOP]
+    if newer:
+        findings.append((
+            "seal-mutation",
+            f"{len(newer)} artifact(s) postdate metrics.json's "
+            f"checker evidence (e.g. "
+            f"{os.path.relpath(newer[0], run_dir)}) — ledger/tests "
+            f"mutated after the checkers were sealed; every sealed "
+            f"checker output is stale"))
+    return findings, warnings
+
+
 # ---------------------------------------------------------------------- main
 
 def main():
@@ -205,10 +347,21 @@ def main():
     errors = []
     truth = ledger_truth(md_text, errors)
     met, met_err = {}, None
+    seal_findings = []
     if args.metrics:
         met, met_err = metrics_truth(args.metrics)
         if met_err:
             errors.append(met_err)
+        try:
+            metrics_obj = json.load(open(args.metrics, encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            metrics_obj = None
+        if isinstance(metrics_obj, dict):
+            sf, sw = audit_seal(
+                os.path.dirname(os.path.abspath(args.metrics)),
+                args.metrics, metrics_obj)
+            seal_findings = sf
+            errors.extend(f"{c}: {m}" for c, m in sw)
     truth.update({k: v for k, v in met.items()})
     collected_n = None
     if args.tests and collect_tests is not None:
@@ -248,9 +401,21 @@ def main():
     if section is None and not args.journal:
         print("  no self-review section and no journal — nothing to "
               "reconcile")
-        return 0
-    if not claims:
+    elif not claims:
         print("  no numeric claims found")
+    if not claims:
+        findings = [{"source": "seal", "line": 0, "kind": c,
+                     "claimed": None, "expected": None, "raw": m}
+                    for c, m in seal_findings]
+        for f in findings:
+            print(f"  seal: {f['kind']}: {f['raw']}  MISMATCH")
+        if args.json:
+            json.dump({"design": args.design, "truth": truth,
+                       "claims_checked": 0, "findings": findings},
+                      open(args.json, "w"), indent=1)
+        if findings:
+            print(f"  FAIL — {len(findings)} seal finding(s)")
+            return 1
         return 0
 
     findings = []
@@ -283,6 +448,11 @@ def main():
                          "raw": f"passed {cp} + failed {cf}"})
         print(f"  cross: passed {cp} + failed {cf} = {cp + cf} "
               f"!= collected {int(cc)}  MISMATCH")
+
+    for cat, msg in seal_findings:
+        findings.append({"source": "seal", "line": 0, "kind": cat,
+                         "claimed": None, "expected": None, "raw": msg})
+        print(f"  seal: {cat}: {msg}  MISMATCH")
 
     if args.json:
         json.dump({"design": args.design, "truth": truth,

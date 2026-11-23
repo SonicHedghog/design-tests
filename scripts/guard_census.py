@@ -549,8 +549,8 @@ class GuardVisitor(ast.NodeVisitor):
 
 
 def scan_source(case_dir):
-    """Return (classes, skipped_internal, warnings)."""
-    classes, skipped, warnings = [], 0, []
+    """Return (classes, skipped_internal, warnings, public_units)."""
+    classes, skipped, warnings, pub = [], 0, [], []
     for root, _, fns in os.walk(case_dir):
         for fn in sorted(fns):
             if not fn.endswith(".py"):
@@ -565,6 +565,7 @@ def scan_source(case_dir):
             v.visit(tree)
             classes += v.classes
             skipped += v.skipped_internal
+            pub += _public_units(tree, path)
     # dedupe identical (site, cls) pairs
     seen, out = set(), []
     for c in classes:
@@ -572,10 +573,148 @@ def scan_source(case_dir):
         if k not in seen:
             seen.add(k)
             out.append(c)
-    return out, skipped, warnings
+    return out, skipped, warnings, pub
+
+
+# ------------------------------------------------- wrong-type probe census
+#
+# PROBE MATRIX seal (r32): every public unit must enumerate wrong-type
+# members — probes feeding a class the signature doesn't constrain to
+# (int/str/list/tuple/dict/set/None/bool/bytes for Python). A unit whose
+# ledger members carry no type-class signal at all is an enumeration
+# gap, not a typed suite — validators_r32 shipped zero non-str probes.
+
+WT_EXACT = {"int", "ints", "str", "list", "lists", "set", "sets",
+            "none", "null", "nil", "nan", "inf", "object", "objects",
+            "true", "false", "self", "cls"}
+WT_STEM = {"integer", "float", "double", "decimal", "fraction",
+           "number", "numeric", "numeral", "boolean", "bool",
+           "string", "bytes", "bytearray", "unicode", "tuple",
+           "tuples", "dict", "dicts", "dictionary", "frozenset",
+           "mapping", "mappings", "sequence", "iterable", "array",
+           "infinity", "nonetype", "nonstr", "nonstring", "nonnumeric",
+           "wrongtype", "badtype", "typemismatch", "typeerror",
+           "attributeerror", "attrerr", "keyerror"}
+WT_SUBS = {"wrongtype", "badtype", "typeerror", "attributeerror",
+           "typemismatch", "nonetype", "nonstr", "nonstring"}
+WT_LITERAL_RE = re.compile(
+    r"\[\s*[\[{(]|\bNone\b|\bnull\b|\bTrue\b|\bFalse\b")
+
+
+def _wt_hit(words, squashed, raw):
+    if words & WT_EXACT:
+        return True
+    if any(_word_hit(words, t) for t in WT_STEM):
+        return True
+    if any(t in squashed for t in WT_SUBS):
+        return True
+    return bool(WT_LITERAL_RE.search(raw))
+
+
+def _n_params(node, method=False):
+    a = node.args
+    n = (len(a.posonlyargs) + len(a.args) + len(a.kwonlyargs)
+         + (1 if a.vararg else 0) + (1 if a.kwarg else 0))
+    if method and n and (a.posonlyargs or a.args):
+        first = (a.posonlyargs + a.args)[0].arg
+        if first in ("self", "cls"):
+            n -= 1
+    return n
+
+
+def _public_units(tree, path):
+    """Public unit census for the wrong-type probe join: top-level
+    public functions and public methods of public classes, with the
+    param count (a unit with no params has no type domain to probe)."""
+    units = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name.startswith("_"):
+                continue
+            units.append({"name": node.name, "n": _n_params(node),
+                          "site": f"{path}:{node.lineno}"})
+        elif isinstance(node, ast.ClassDef) and \
+                not node.name.startswith("_"):
+            for m in node.body:
+                if isinstance(m, (ast.FunctionDef,
+                                  ast.AsyncFunctionDef)) \
+                        and (not m.name.startswith("_")
+                             or (m.name.startswith("__")
+                                 and m.name.endswith("__"))):
+                    units.append({
+                        "name": f"{node.name}.{m.name}",
+                        "n": _n_params(m, method=True),
+                        "site": f"{path}:{m.lineno}"})
+    return units
+
+
+def _unit_belongs(unit_name, text):
+    """Does this spelling belong to the unit? Unit words all present,
+    or the squashed unit name is a substring of the squashed text."""
+    uw = _words(unit_name)
+    if uw and uw <= _words(text):
+        return True
+    us = _squash(unit_name)
+    return len(us) >= 4 and us in _squash(text)
+
+
+def unit_spellings(led, unit_names):
+    """unit-name -> [(words, squashed, raw)] of ledger spellings
+    attributable to that unit: every member of an obligation/witness/
+    fold that names the unit, plus any spelling naming it directly."""
+    out = {u: [] for u in unit_names}
+    shorts = {}
+    for u in unit_names:
+        shorts.setdefault(u.rsplit(".", 1)[-1], []).append(u)
+    all_names = unit_names + [s for s in shorts if s not in unit_names]
+
+    def add(raw):
+        if raw is None:
+            return
+        s = str(raw)
+        w, sq = _words(s), _squash(s)
+        for u in all_names:
+            if _unit_belongs(u, s):
+                for tgt in shorts.get(u, [u]):
+                    out[tgt].append((w, sq, s))
+
+    def member_key(m):
+        if isinstance(m, dict):
+            for k in ("name", "id", "member", "value", "side"):
+                if k in m:
+                    return str(m[k])
+            return json.dumps(m, sort_keys=True)
+        return str(m)
+
+    for o in (led or {}).get("obligations") or []:
+        if not isinstance(o, dict):
+            continue
+        members = [member_key(m) for m in o.get("members") or []]
+        add(o.get("id"))
+        add(o.get("name"))
+        for m in members:
+            add(m)
+    for w in (led or {}).get("witnesses") or []:
+        if not isinstance(w, dict):
+            continue
+        add(tail_name(w.get("test", "")))
+        for c in w.get("covers") or []:
+            if not isinstance(c, dict):
+                continue
+            add(c.get("obligation"))
+            ms = c.get("members")
+            for m in (ms if isinstance(ms, list) else [ms]):
+                add(member_key(m))
+    for f in (led or {}).get("folds") or []:
+        if isinstance(f, dict):
+            add(member_key(f.get("member")))
+            add(f.get("fold_into"))
+    return out
 
 
 # ------------------------------------------------------------- ledger corpus
+
+spellings_led = [None]          # parsed ledger dict, set by ledger_corpus
 
 def ledger_corpus(md_text, errors):
     """All ledger spellings that can plausibly enumerate a member
@@ -594,6 +733,7 @@ def ledger_corpus(md_text, errors):
         errors.append(f"ledger block unparseable: {e}")
         return []
     spellings = []
+    spellings_led[0] = led
 
     def add(x):
         if x is None:
@@ -665,7 +805,7 @@ def main():
 
     errors = []
     corpus = ledger_corpus(md_text, errors)
-    classes, skipped, warnings = scan_source(args.case_dir)
+    classes, skipped, warnings, pub = scan_source(args.case_dir)
 
     print(f"guard_census: design={args.design} case-dir={args.case_dir}")
     for w in warnings + errors:
@@ -688,21 +828,48 @@ def main():
         if not covered(c, corpus):
             findings.append(c)
 
+    # wrong-type-gap join (r32): every public unit with a type-mistakable
+    # signature must carry >=1 type-class member in the ledger.
+    wt_gaps = []
+    led = spellings_led[0]
+    if isinstance(led, dict):
+        units = [u for u in pub if u["n"] > 0]
+        usp = unit_spellings(led, [u["name"] for u in units])
+        for u in units:
+            sp = usp.get(u["name"]) or []
+            if sp and not any(_wt_hit(w, sq, raw)
+                              for w, sq, raw in sp):
+                wt_gaps.append(u)
+
     if args.json:
         json.dump({"design": args.design, "case_dir": args.case_dir,
                    "sites": n_sites, "required": len(classes),
                    "findings": [{"site": c["site"], "door": c["door"],
                                  "func": c["func"], "class": c["cls"],
                                  "label": c["label"]}
-                                for c in findings]},
+                                for c in findings],
+                   "wrong_type_gaps": [{"unit": u["name"],
+                                        "site": u["site"]}
+                                       for u in wt_gaps]},
                   open(args.json, "w"), indent=1)
         print(f"  json -> {args.json}")
+    for u in wt_gaps:
+        print(f"  {u['site']}: [wrong-type-gap] public unit "
+              f"{u['name']}() has ledger members but NONE is a "
+              f"wrong-type/type-class member (int/str/list/tuple/"
+              f"dict/set/None/bool/bytes probe) — a str-only "
+              f"enumeration is not a probe matrix")
+    if wt_gaps:
+        print(f"  FAIL — {len(wt_gaps)} unit(s) with no wrong-type "
+              f"probe member")
     if findings:
         for c in findings:
             ctx = f" in {c['func']}()" if c["func"] else ""
             print(f"  {c['site']}: [{c['door']}]{ctx} no ledger member "
                   f"plausibly covers {c['label']}")
         print(f"  FAIL — {len(findings)} uncovered guard class(es)")
+        return 1
+    if wt_gaps:
         return 1
     print("  OK — every guard class plausibly enumerated")
     return 0

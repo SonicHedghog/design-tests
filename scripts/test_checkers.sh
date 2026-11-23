@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run all seven design-tests checkers against a run dir, tolerating
+# Run all eight design-tests checkers against a run dir, tolerating
 # missing inputs (each checker is skipped with a note when its inputs
 # are absent).
 #
@@ -41,19 +41,25 @@ run() {  # run <label> <cmd...>
     label="$1"; shift
     ran=$((ran + 1))
     echo "=== $label"
-    if "$@"; then
+    out="$("$@" 2>&1)"; rc=$?
+    echo "$out"
+    if [ "$rc" -eq 0 ]; then
         echo "--- $label: clean"
     else
-        rc=$?
         echo "--- $label: findings (exit $rc)"
         fail=1
     fi
+    # seal: append evidence line for metrics.json merge
+    esc=$(printf '%s' "$out" | tail -3 | tr '\n' ' ' | sed 's/"/'"'"'/g')
+    printf '{"%s": {"exit": %d, "cmd": "%s", "tail": "%s"}}\n' \
+        "$label" "$rc" "$*" "$esc" >> "$RUN/.checker_evidence.jsonl"
     echo
 }
 
 if [ -f "$DESIGN" ]; then
     args=("$DESIGN")
     [ -d "$TESTS" ] && args+=(--tests "$TESTS")
+    [ -n "$SRC" ] && [ -d "$SRC" ] && args+=(--src "$SRC")
     run ledger_reconcile python3 "$HERE/ledger_reconcile.py" "${args[@]}"
 else
     echo "=== ledger_reconcile: skipped (no $DESIGN)"; echo
@@ -65,8 +71,14 @@ else
     echo "=== oracle_lint: skipped (no $TESTS)"; echo
 fi
 
-if [ -d "$TESTS" ]; then
-    run dup_sweep python3 "$HERE/dup_sweep.py" "$TESTS"
+if [ -d "$TESTS" ] || [ -d "$RUN/junit" ]; then
+    dargs=()
+    [ -d "$TESTS" ] && dargs+=("$TESTS")
+    # junit/ feeds the flag-green-collision join on Java runs (r36:
+    # cli_r36 shipped a green assert and a defect flag on the
+    # identical argv literal).
+    [ -d "$RUN/junit" ] && dargs+=("$RUN/junit")
+    run dup_sweep python3 "$HERE/dup_sweep.py" "${dargs[@]}"
 else
     echo "=== dup_sweep: skipped (no $TESTS)"; echo
 fi
@@ -95,6 +107,18 @@ else
 fi
 
 if [ -f "$DESIGN" ]; then
+    # RUN (not DESIGN) is passed so pin_manifest can find junit/ and
+    # staged *.java under the run dir; --tests/--src are flags so a
+    # missing tests dir can no longer shift --src into the tests slot.
+    args=("$RUN")
+    [ -d "$TESTS" ] && args+=(--tests "$TESTS")
+    [ -n "$SRC" ] && [ -d "$SRC" ] && args+=(--src "$SRC")
+    run pin_manifest python3 "$HERE/pin_manifest.py" "${args[@]}"
+else
+    echo "=== pin_manifest: skipped (no $DESIGN)"; echo
+fi
+
+if [ -f "$DESIGN" ]; then
     args=("$DESIGN")
     [ -f "$RUN/journal.txt" ] && args+=(--journal "$RUN/journal.txt")
     [ -f "$RUN/metrics.json" ] && args+=(--metrics "$RUN/metrics.json")
@@ -104,6 +128,20 @@ else
     echo "=== claim_reconcile: skipped (no $DESIGN)"; echo
 fi
 
+if [ -f "$RUN/metrics.json" ] && [ -f "$RUN/.checker_evidence.jsonl" ]; then
+    python3 - "$RUN" <<'PYEOF'
+import json, sys
+run = sys.argv[1]
+m = json.load(open(run + "/metrics.json"))
+ev = {}
+for line in open(run + "/.checker_evidence.jsonl"):
+    ev.update(json.loads(line))
+m["checkers"] = ev
+json.dump(m, open(run + "/metrics.json", "w"), indent=2)
+PYEOF
+    rm -f "$RUN/.checker_evidence.jsonl"
+    echo "test_checkers: evidence sealed into metrics.json"
+fi
 if [ "$fail" -eq 0 ]; then
     echo "test_checkers: OK ($ran checker(s) run)"
 else

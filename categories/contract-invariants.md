@@ -9,8 +9,8 @@ concrete instances:
 
 - Equality/hash: a==b implies hash(a)==hash(b); equal objects behave
   identically in set membership and dict lookup. Construct equal
-  objects via DIFFERENT input spellings — alternate representations,
-  canonical vs non-canonical forms, equivalent syntaxes — that is
+  objects via DIFFERENT input spellings — alternate representations
+  or encodings of equal values, equivalent syntaxes — that is
   where these
   contracts break.
 - Ordering consistency: a<b and b<c -> a<c; cmp==0 iff eq; compare
@@ -43,8 +43,9 @@ Row sources, all mandatory:
 3. Model facts: EVERY "X == Y under normalization N" fact in the
    requirements model MUST appear as a row — do not file
    normalization behavior under compare-semantics only.
-For EACH axis emit a row asserting: a==b, hash(a)==hash(b),
-len({a,b})==1, and dict/set membership of b in {a}. Axes require
+For EACH axis emit a row asserting the pair compares equal, hashes
+equal, and collapses to one element under set/dict membership.
+Axes require
 DIFFERENT input spellings — an axis whose two sides are the SAME
 object/member is interpreter-guaranteed, not a contract test; skip
 it. If an axis fails, that is a suspected defect — keep the test.

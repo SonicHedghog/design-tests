@@ -51,10 +51,28 @@ Findings (file:line pairs):
                     raises(A, B..) < raises(<strict subset>)
                     raises(Exception/BaseException) < raises(<other>)
 
-Whitelist: files named test_suspected_defects* are excluded — defect
-flags intentionally replay inputs under different oracles (different
+Flag files: files named test_suspected_defects* are excluded from the
+dup/near-dup index but scanned for CROSS-VERDICT overlap — a flag case
+sharing a normalized input set with any green case is a
+`contradiction` finding: a divergent outcome is never a green expected
+value, so flag x green same-input pairs mean one encodes the wrong
+verdict (the only legal overlap is a green assert on a DIFFERENT
+clause's conforming outcome). Old flag whitelist
 assertion shape => not a dup anyway; this just keeps them from
 pairing with the suite they deliberately re-run).
+
+flag-green-collision (r36 pin-OUTCOME seal): a green assert and a flag/
+red test asserting on the SAME input literal — the same call args,
+modulo trivial normalization — contradict: one must be wrong. Python
+call arg tuples (callee + all-literal args, parametrize envs resolved)
+and Java argv literals (`new T[]{...}` / `asList`/`of` factories) are indexed per file;
+an exact-arg signature shared by a green file and a
+*SuspectedDefects*/flag file => FAIL. Java files under junit/ (or any
+dir passed here) are scanned — .java basenames containing 'suspected'
+are flag files, the rest green (r36: cli_r36 shipped a green
+innerQuoteKept assert on {"-f","\"a\"b\""} for all four parsers AND a
+flag on the identical DefaultParser input — the green assert
+laundered the defect).
 
 Exit: 1 on any dup finding; 0 when only near-dups or clean; 2 usage.
 """
@@ -64,6 +82,7 @@ import copy
 import itertools
 import json
 import os
+import re
 import sys
 
 WARN, FAIL = "WARN", "FAIL"
@@ -348,7 +367,7 @@ _OP_EXPR = (ast.Call, ast.Subscript, ast.BinOp, ast.UnaryOp, ast.BoolOp,
             ast.Compare, ast.IfExp, ast.Attribute, ast.Await)
 
 
-def _walk_body(stmts, n, calls, preds):
+def _walk_body(stmts, n, calls, preds, sigs=None):
     """Collect normalized call norms + oracle predicates over a
     statement list, resolving constant-foldable `if` branches."""
     for st in stmts:
@@ -356,14 +375,15 @@ def _walk_body(stmts, n, calls, preds):
             for c in ast.walk(st.test):
                 if isinstance(c, ast.Call):
                     calls.add(n.n(c))
+                    _add_call_sig(n, c, sigs)
             ok, v = n.const_eval(st.test)
             if ok and v:
-                _walk_body(st.body, n, calls, preds)
+                _walk_body(st.body, n, calls, preds, sigs)
             elif ok:
-                _walk_body(st.orelse, n, calls, preds)
+                _walk_body(st.orelse, n, calls, preds, sigs)
             else:
-                _walk_body(st.body, n, calls, preds)
-                _walk_body(st.orelse, n, calls, preds)
+                _walk_body(st.body, n, calls, preds, sigs)
+                _walk_body(st.orelse, n, calls, preds, sigs)
         elif isinstance(st, (ast.With, ast.AsyncWith)):
             for item in st.items:
                 if _is_raises_ctx(item.context_expr):
@@ -372,25 +392,28 @@ def _walk_body(stmts, n, calls, preds):
                     for c in ast.walk(item.context_expr):
                         if isinstance(c, ast.Call):
                             calls.add(n.n(c))
-            _walk_body(st.body, n, calls, preds)
+                            _add_call_sig(n, c, sigs)
+            _walk_body(st.body, n, calls, preds, sigs)
         elif isinstance(st, (ast.For, ast.AsyncFor)):
             for c in ast.walk(st.iter):
                 if isinstance(c, ast.Call):
                     calls.add(n.n(c))
-            _walk_body(st.body, n, calls, preds)
-            _walk_body(st.orelse, n, calls, preds)
+                    _add_call_sig(n, c, sigs)
+            _walk_body(st.body, n, calls, preds, sigs)
+            _walk_body(st.orelse, n, calls, preds, sigs)
         elif isinstance(st, ast.While):
             for c in ast.walk(st.test):
                 if isinstance(c, ast.Call):
                     calls.add(n.n(c))
-            _walk_body(st.body, n, calls, preds)
-            _walk_body(st.orelse, n, calls, preds)
+                    _add_call_sig(n, c, sigs)
+            _walk_body(st.body, n, calls, preds, sigs)
+            _walk_body(st.orelse, n, calls, preds, sigs)
         elif isinstance(st, ast.Try):
-            _walk_body(st.body, n, calls, preds)
+            _walk_body(st.body, n, calls, preds, sigs)
             for h in st.handlers:
-                _walk_body(h.body, n, calls, preds)
-            _walk_body(st.orelse, n, calls, preds)
-            _walk_body(st.finalbody, n, calls, preds)
+                _walk_body(h.body, n, calls, preds, sigs)
+            _walk_body(st.orelse, n, calls, preds, sigs)
+            _walk_body(st.finalbody, n, calls, preds, sigs)
         elif not isinstance(st, _SKIP_STMT):
             if isinstance(st, (ast.Expr, ast.Assign, ast.AugAssign,
                                ast.Return)) and st.value is not None \
@@ -399,22 +422,61 @@ def _walk_body(stmts, n, calls, preds):
             for c in ast.walk(st):
                 if isinstance(c, ast.Call):
                     calls.add(n.n(c))
+                    _add_call_sig(n, c, sigs)
             if isinstance(st, ast.Assert):
                 preds += _assert_preds(n, st.test)
 
 
+def _add_call_sig(n, c, sigs):
+    """Record the flag-green-collision signature of one call: its
+    callee basename plus the normalized tuple of arg literals when
+    EVERY arg resolves to a literal. Literal list/tuple/set args also
+    mint an argv-tuple signature ('#argv', elts) — the
+    `parse(["-f","x"])` shape a Java `new String[]{...}` row mirrors.
+    """
+    if sigs is None:
+        return
+    name = _call_name(c)
+    if not name:
+        return
+    args, arrs = [], []
+    for a in c.args:
+        if isinstance(a, ast.Starred):
+            return
+        norm = n.n(a)
+        if not _is_lit(norm):
+            return
+        args.append(norm)
+        ok, v = _litval(norm)
+        if ok and isinstance(v, (tuple, list)) and v and \
+                all(isinstance(x, (str, int, float, bool)) for x in v):
+            arrs.append(tuple(v))
+    for k in c.keywords:
+        if k.arg is None:
+            return
+        norm = n.n(k.value)
+        if not _is_lit(norm):
+            return
+        args.append(f"{k.arg}={norm}")
+    if args:
+        sigs.add((name, tuple(args)))
+    for t in arrs:
+        sigs.add(("#argv", t))
+
+
 def function_signature(fn, env):
-    """(input_set, preds) for one case's env: every normalized call in
-    the executed body, plus its oracle predicates."""
+    """(input_set, preds, sigs) for one case's env: every normalized
+    call in the executed body, its oracle predicates, and the
+    all-literal call-arg signatures for the flag-green-collision join."""
     assigns = {}
     for node in ast.walk(fn):
         if isinstance(node, ast.Assign) and len(node.targets) == 1 \
                 and isinstance(node.targets[0], ast.Name):
             assigns.setdefault(node.targets[0].id, node.value)
     n = _Norm(env, assigns)
-    calls, preds = set(), []
-    _walk_body(fn.body, n, calls, preds)
-    return tuple(sorted(calls)), frozenset(preds)
+    calls, preds, sigs = set(), [], set()
+    _walk_body(fn.body, n, calls, preds, sigs)
+    return tuple(sorted(calls)), frozenset(preds), sigs
 
 
 # ------------------------------------------------------------- parametrize
@@ -504,12 +566,214 @@ def collect_cases(path):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
                 and node.name.startswith("test"):
             for env, line in fn_cases(node):
-                calls, preds = function_signature(node, env)
+                calls, preds, sigs = function_signature(node, env)
                 cases.append({
                     "file": path, "line": line, "name": node.name,
-                    "input": calls, "preds": preds,
+                    "input": calls, "preds": preds, "sigs": sigs,
                 })
     return cases, finds
+
+
+# ----------------------------------------------- flag-green-collision join
+#
+# A green assert and a flag/red test asserting on the SAME input
+# literal (same call args, modulo trivial normalization) contradict:
+# one must be wrong. The join is signature-based: Python cases emit
+# (callee, literal-arg-tuple) sigs from their executed bodies and
+# ('#argv', elts) sigs for literal argv lists; Java files are scanned
+# textually for `new T[]{...}` argv literals and `asList`/`of`-family
+# collection factories — the input literal a suite feeds the SUT.
+# A signature shared by a green file and a suspected-defect file
+# => FAIL.
+
+JAVA_ARGV_RE = re.compile(
+    r"\bnew\s+[\w.$]*(?:<[^;{}()]*>)?\s*\[\s*\]\s*\{")
+JAVA_FACTORY_WORDS = {"aslist", "of", "singleton", "singletonlist",
+                      "singletonmap", "ncopies", "argumentsof"}
+JAVA_CALL_RE = re.compile(r"\b([a-z][A-Za-z0-9_]*)\s*\(")
+JAVA_STR_LIT_RE = re.compile(r'"(?:\\.|[^"\\])*"')
+JAVA_CHAR_LIT_RE = re.compile(r"'(?:\\.|[^'\\])'")
+JAVA_NUM_LIT_RE = re.compile(
+    r"\b\d+(?:_\d+)*(?:\.\d+(?:_\d+)*)?(?:[eE][+-]?\d+)?[fFdDlL]?\b|"
+    r"\b0[xX][0-9a-fA-F]+[lL]?\b")
+JAVA_KW_LIT_RE = re.compile(r"\b(?:true|false|null)\b")
+
+
+def _java_skip_ws(text, i):
+    while i < len(text) and text[i] in " \t\n\r":
+        i += 1
+    return i
+
+
+def _java_match_paren(text, start):
+    """Index of the ')' matching text[start] == '(' (or '{'=='}'),
+    quote/char/comment-aware; -1 when unbalanced."""
+    close = ")" if text[start] == "(" else "}"
+    open_ = text[start]
+    depth, i, quote, esc = 0, start, None, False
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "/" and text[i:i + 2] == "//":
+            j = text.find("\n", i)
+            i = len(text) if j < 0 else j
+            continue
+        elif ch == "/" and text[i:i + 2] == "/*":
+            j = text.find("*/", i + 2)
+            i = len(text) if j < 0 else j + 1
+        elif ch == open_:
+            depth += 1
+        elif ch == close:
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return -1
+
+
+def _java_split_args(argstr):
+    """Split a Java arg list on top-level commas (quote/paren-safe)."""
+    args, depth, quote, esc, cur = [], 0, None, False, []
+    i = 0
+    while i < len(argstr):
+        ch = argstr[i]
+        if quote:
+            cur.append(ch)
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == quote:
+                quote = None
+        elif ch in "'\"`":
+            quote = ch
+            cur.append(ch)
+        elif ch in "([{":
+            depth += 1
+            cur.append(ch)
+        elif ch in ")]}":
+            depth -= 1
+            cur.append(ch)
+        elif ch == "/" and argstr[i:i + 2] == "//":
+            j = argstr.find("\n", i)
+            if j < 0:
+                break
+            i = j
+            continue
+        elif ch == "/" and argstr[i:i + 2] == "/*":
+            j = argstr.find("*/", i + 2)
+            if j < 0:
+                break
+            i = j + 1
+            continue
+        elif ch == "," and depth == 0:
+            args.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+        i += 1
+    tail = "".join(cur).strip()
+    if tail:
+        args.append(tail)
+    return args
+
+
+def _java_decode_str(tok):
+    """Decode a Java string/char literal body (no quotes)."""
+    out, i = [], 0
+    while i < len(tok):
+        ch = tok[i]
+        if ch == "\\" and i + 1 < len(tok):
+            nxt = tok[i + 1]
+            if nxt == "u" and i + 5 < len(tok):
+                try:
+                    out.append(chr(int(tok[i + 2:i + 6], 16)))
+                    i += 6
+                    continue
+                except ValueError:
+                    pass
+            out.append({"n": "\n", "t": "\t", "r": "\r", "b": "\b",
+                        "f": "\f", "0": "\0", "\\": "\\", '"': '"',
+                        "'": "'"}.get(nxt, nxt))
+            i += 2
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+def _java_lit_value(arg):
+    """(ok, value) — a Java literal arg normalized to a Python value."""
+    a = arg.strip()
+    m = JAVA_STR_LIT_RE.fullmatch(a)
+    if m:
+        return True, _java_decode_str(m.group(0)[1:-1])
+    m = JAVA_CHAR_LIT_RE.fullmatch(a)
+    if m:
+        return True, _java_decode_str(m.group(0)[1:-1])
+    m = JAVA_NUM_LIT_RE.fullmatch(a)
+    if m:
+        t = re.sub(r"[fFdDlL]$", "", m.group(0)).replace("_", "")
+        try:
+            return True, float(t) if re.search(r"[.eE]", t) else int(t)
+        except ValueError:
+            try:
+                return True, int(t, 16)
+            except ValueError:
+                return False, None
+    if JAVA_KW_LIT_RE.fullmatch(a):
+        return True, {"true": True, "false": False, "null": None}[a]
+    return False, None
+
+
+def _java_lit_tuple(argstr):
+    """tuple of decoded literals when EVERY comma-separated arg is a
+    literal, else None."""
+    if not argstr.strip():
+        return None
+    vals = []
+    for a in _java_split_args(argstr):
+        ok, v = _java_lit_value(a)
+        if not ok:
+            return None
+        vals.append(v)
+    return tuple(vals)
+
+
+def java_arg_sigs(text):
+    """Yield (lineno, sig) for argv-literal and all-literal call
+    signatures in Java test source."""
+    seen_at = set()
+    for m in JAVA_ARGV_RE.finditer(text):
+        open_i = text.index("{", m.start())
+        close_i = _java_match_paren(text, open_i)
+        if close_i < 0:
+            continue
+        t = _java_lit_tuple(text[open_i + 1:close_i])
+        if t:
+            ln = text.count("\n", 0, m.start()) + 1
+            if (ln, "#argv") not in seen_at:
+                seen_at.add((ln, "#argv"))
+                yield ln, ("#argv", t)
+    for m in JAVA_CALL_RE.finditer(text):
+        name = m.group(1)
+        if name.lower() not in JAVA_FACTORY_WORDS:
+            continue
+        open_i = text.index("(", m.end() - 1)
+        close_i = _java_match_paren(text, open_i)
+        if close_i < 0:
+            continue
+        t = _java_lit_tuple(text[open_i + 1:close_i])
+        if t:
+            yield text.count("\n", 0, m.start()) + 1, ("#argv", t)
 
 
 # ------------------------------------------------------------- weakening
@@ -634,26 +898,41 @@ def main():
     ap.add_argument("--json", help="write machine-readable findings JSON")
     args = ap.parse_args()
 
-    files = []
+    files, jfiles = [], []
     for t in args.tests:
         if os.path.isfile(t):
-            files.append(t)
+            if t.endswith(".py"):
+                files.append(t)
+            elif t.endswith(".java"):
+                jfiles.append(t)
         elif os.path.isdir(t):
             for root, _, fns in os.walk(t):
-                files += [os.path.join(root, f) for f in sorted(fns)
-                          if f.endswith(".py")]
+                for f in sorted(fns):
+                    if f.endswith(".py"):
+                        files.append(os.path.join(root, f))
+                    elif f.endswith(".java"):
+                        jfiles.append(os.path.join(root, f))
         else:
             print(f"error: not found: {t}")
             return 2
     files = sorted(set(files))
-    whitelisted = [f for f in files
-                   if os.path.basename(f).startswith(DEFECT_GLOB)]
-    files = [f for f in files if f not in whitelisted]
+    jfiles = sorted(set(jfiles))
+    flag_files = [f for f in files
+                  if os.path.basename(f).startswith(DEFECT_GLOB)]
+    files = [f for f in files if f not in flag_files]
+    jflag = [f for f in jfiles
+             if "suspected" in os.path.basename(f).lower()]
+    jgreen = [f for f in jfiles if f not in jflag]
 
     cases, finds = [], []
     for path in files:
         c, f = collect_cases(path)
         cases += c
+        finds += f
+    flag_cases = []
+    for path in flag_files:
+        c, f = collect_cases(path)
+        flag_cases += c
         finds += f
 
     # dup: identical (input set, predicate set)
@@ -690,12 +969,73 @@ def main():
                               f"{kind} than '{s['name']}' on the same "
                               f"input at {s['file']}:{s['line']}"))
 
+    # cross-verdict: flag-case input appearing in any green case
+    green_inputs = {c["input"]: c for c in cases}
+    for fc in flag_cases:
+        g = green_inputs.get(fc["input"])
+        if g is not None:
+            finds.append((g["file"], g["line"], FAIL,
+                          "contradiction",
+                          f"input also asserted as defect flag "
+                          f"'{fc['name']}' at "
+                          f"{fc['file']}:{fc['line']} — a divergent "
+                          f"outcome is never a green expected value"))
+
+    # flag-green-collision (r36): an exact-arg signature — callee +
+    # all-literal args, or an argv literal — shared by a green file and
+    # a *SuspectedDefects*/flag file. One side asserts the observed
+    # outcome, the other the conforming one: they cannot both be right.
+    green_sigs = {}
+    for c in cases:
+        for s in c["sigs"]:
+            green_sigs.setdefault(s, c)
+    for fp in jgreen:
+        try:
+            src = open(fp, encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        for ln, s in java_arg_sigs(src):
+            if s not in green_sigs:
+                green_sigs[s] = {"file": fp, "line": ln,
+                                 "name": "<java>"}
+    seen_coll = set()
+    for fc in flag_cases:
+        for s in fc["sigs"]:
+            g = green_sigs.get(s)
+            if g is None or (s, g["file"], g["line"]) in seen_coll:
+                continue
+            seen_coll.add((s, g["file"], g["line"]))
+            finds.append((g["file"], g["line"], FAIL,
+                          "flag-green-collision",
+                          f"call args {s[1]!r} on '{s[0]}' also "
+                          f"asserted as defect flag '{fc['name']}' at "
+                          f"{fc['file']}:{fc['line']} — same input, "
+                          f"opposite verdicts: one is wrong"))
+    for fp in jflag:
+        try:
+            src = open(fp, encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        for ln, s in java_arg_sigs(src):
+            g = green_sigs.get(s)
+            if g is None or (s, g["file"], g["line"]) in seen_coll:
+                continue
+            seen_coll.add((s, g["file"], g["line"]))
+            finds.append((g["file"], g["line"], FAIL,
+                          "flag-green-collision",
+                          f"input literal {s[1]!r} also asserted as "
+                          f"defect flag at {fp}:{ln} — same input, "
+                          f"opposite verdicts: one is wrong"))
+
     finds = sorted(set(finds), key=lambda x: (x[0], x[1]))
     n_fail = sum(1 for f in finds if f[2] == FAIL)
     n_warn = sum(1 for f in finds if f[2] == WARN)
     print(f"dup_sweep: {len(files)} file(s), {len(cases)} case(s)"
-          + (f" [{len(whitelisted)} defect-flag file(s) whitelisted]"
-             if whitelisted else ""))
+          + (f" [{len(flag_files) + len(jflag)} flag file(s) "
+             f"cross-verdicted: {len(flag_cases)} flag case(s)]"
+             if flag_files or jflag else "")
+          + (f" [{len(jfiles)} java file(s) collision-scanned]"
+             if jfiles else ""))
     for path, lineno, sev, shape, msg in finds:
         print(f"  {path}:{lineno}: [{sev}] {shape}: {msg}")
     if args.json:

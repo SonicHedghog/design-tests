@@ -13,8 +13,7 @@ When a type defines `__eq__`, `__hash__`, ordering, or repr:
 
 - **eq→hash**: `a == b` MUST imply `hash(a) == hash(b)`. Probe with
   every pair of objects that compare equal but were built from
-  different surface spellings — equality that normalizes while
-  hashing reads the raw stored form is THE classic violation shape.
+  different surface spellings — that is where this axiom breaks.
   Also hash invariance: same value hashed twice, hash stable across
   immutable-copy operations.
 - **eq laws**: reflexive (`a == a`), symmetric, transitive,

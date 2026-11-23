@@ -16,8 +16,7 @@ Fold each relevant one into the class registry and ledger.
   `a.hashCode() == b.hashCode()`; hashCode must be consistent
   while state is unchanged; unequal objects MAY collide (do
   not assert distinctness). Probe equal-but-differently-
-  constructed objects — normalization in equals vs raw-field
-  hashing is THE classic violation.
+  constructed objects — that is where this axiom breaks.
 - **equals symmetry across hierarchy**: subclass-vs-base probes
   both directions — `sub.equals(base)` vs `base.equals(sub)`
   disagree when one side uses getClass and the other

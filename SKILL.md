@@ -112,16 +112,55 @@ naming the category.
   of the exercise.
 - Any budget line with no test, or uncovered branch: resolve or
   justify in TEST_DESIGN.md.
-- Run all seven checkers and fix every finding:
-  scripts/ledger_reconcile.py (member-granularity join),
+- Run all eight checkers and fix every finding:
+  scripts/ledger_reconcile.py (member-granularity join + seals:
+  member-census floor — with --src the ledger's DISCRETE member
+  total must reach >=1 member per 4 public methods on a Java tree
+  (`java-census-floor` FAIL) or per 4 public units on a Python
+  tree (`python-census-floor` FAIL); member granularity — each
+  member names ONE unit + discriminating input, so a member
+  string spelling >=3 distinct public units, or aggregate
+  unit-name coverage >~2x the discrete-member count, is a
+  `member-packing` FAIL and bundles mint no census credit;
+  min-witness floor — >=1
+  witness per 3 members and >=60% of members in witness covers,
+  else `witness-starvation` FAIL; bridge seal — a .py or
+  __pycache__ planted inside a Java --src tree is a
+  `bridge-artifact` FAIL; coverage seal — a coverage config's
+  exclude patterns may not reference ledger door members, else
+  `coverage-exclusion` FAIL; metrics seal — metrics.json
+  collected/tests_run must not diverge from the witness count
+  by >10x without a quantified upstream/external disclosure,
+  else `metrics-divergence` FAIL; phantom seal — every witness
+  `test` ref must resolve to a real discovered test
+  (file+function censused statically under tests//junit/, or
+  the pytest collection when --tests runs), else
+  `phantom-witness` FAIL — `~covN`-style suffixed
+  pseudo-witnesses do not resolve; metrics-untruth seal —
+  metrics.json count claims are re-measured (pytest
+  --collect-only ±5%, static @Test census, mvn test-compile
+  when junit/+pom.xml present, surefire TEST-*.xml totals),
+  mismatches are `metrics-untruth` FAIL and absent toolchains
+  degrade to WARN; covers-false seal — a witness's `covers`
+  member list must be exercised by the test body it names: each
+  covered member's unit token (plus units named by its
+  obligation id) is joined against the test's callee/attribute
+  references, and a witness whose covered units are ALL absent
+  from the named test's call graph is a `covers-false` FAIL —
+  param-row tests need not touch every covered member),
   oracle_lint.py (forbidden oracle shapes), dup_sweep.py
   (literal-identical input × assertion-shape duplicates and
   strictly-weaker near-dups across names/files), boundary_audit.py
   (declared-bound side coverage + transform-collapse interior),
   surface_closure.py (public-surface + source closure),
-  guard_census.py (implementation guard sites × member classes),
+  guard_census.py (implementation guard sites × member classes,
+  plus the probe-matrix join — a public unit with ledger members
+  but no wrong-type/type-class member is `wrong-type-gap` FAIL),
   claim_reconcile.py (reported numeric claims vs
-  ledger/metrics).
+  ledger/metrics, plus the r38 seal-mutation audit: metrics.json
+  must carry `sealed_at` + `content_hash` over ledger.json +
+  test files — recompute on disk, else `seal-mutation` FAIL;
+  missing seal is WARN-only for legacy runs).
 - **Oracle lint (mechanical):** grep the suite for forbidden oracle
   shapes: expected values computed with the implementation's own
   formula (`f(x) == f`'s-formula) or RESTATING an impl formula
@@ -188,7 +227,8 @@ naming the category.
   globals) mint a member per reachable state value — patch the
   state in-process; never disposition as unreachable. A justify-out
   line is invalid when a module-attr/monkeypatch could reach it —
-  test the patch (e.g. __package__="" on a __main__ module) before
+  test the patch (e.g. patching the package attribute the guard
+  reads) before
   claiming unreachability. VIOLATION-DOOR DISPOSITION: every docstring
   or contract clause whose observed behavior diverges must appear
   in a §5 disposition table — each door gets an explicit verdict
@@ -204,8 +244,9 @@ naming the category.
   documented axiom. When observed behavior contradicts a
   language-level or documented contract, flag it. NEVER pin the
   violation itself as expected — an assertion encoding the
-  divergence (e.g. hash-inequality for an eq pair) is an inverted
-  oracle: it fails on the fixed impl. Pins assert CONFORMING
+  divergence (e.g. asserting a documented exception is swallowed
+  into a falsy return) is an inverted oracle: it fails on the
+  fixed impl. Pins assert CONFORMING
   behavior only; divergent behavior on a documented contract is
   a flag. When sibling members share a root cause but differ in
   fix-repaired vs still-open status, the flag sits on the
@@ -230,8 +271,11 @@ naming the category.
   at one site and pin its violation at another. If ANY
   plausible reading of a covering clause is contradicted, the
   verdict is a flag; qfm may accompany but never replaces the
-  assert, and a qfm verdict must actually LAND in the
-  questions file before delivery.
+  assert, and a qfm verdict must actually LAND in the run's
+  OWN questions-for-maintainer.md before delivery — never
+  append to a shared questions file directly; merging
+  per-run files into a shared file is an orchestrator-side
+  serialized step (concurrent appends have truncated it).
   Reason against the VERBATIM doc wording only — never upgrade
   a paraphrase ("whitespace" for "spaces", "numeric" for
   "digits") into a stronger clause and pin against the upgrade.
@@ -298,6 +342,9 @@ naming the category.
   round trip at every non-default config, not just the one
   where it happens to hold.
 - **Pin-proof (mandatory before shipping):** for EVERY
+  Every green-assert literal on a spec-silent member carries a
+  `provenance:` field resolving to a manifest pin id — a green
+  assert with no provenance is an undisclosed pin (evasion).
   spec-silent pin, fold, or observed-behavior witness on a
   divergence, you must first TRY to write the conforming
   flag (`assert documented_contract(input)`). If it fails,
@@ -317,7 +364,62 @@ naming the category.
   (e.g. "tried `assert pred(None) is True` → got
   SomeValidationError"). If a row has no cited attempt, it is
   an unproven pin and must be upgraded to a flag before
-  shipping. A zero-flag run on code with any documented
+  shipping.
+- **Executing conforming_attempts (checker-enforced):**
+  `scripts/pin_manifest.py --src SRC` materializes each pin's
+  `{tried,input}` into a runnable probe and compares the
+  measured outcome to the recorded `result`. Python probes run
+  against the case source (10s timeout); Java attempts are
+  honestly marked `exec: skipped-java` (no JVM compile in the
+  checker). `tried` must reference the pinned unit and input —
+  or a resolvable alias — and a fabricated `result: pass` is an
+  `exec-mismatch` FAIL, while an honest `result: fail` still
+  fires binding-attempt → flag-or-qfm. Attempt-independence is
+  also enforced: `tried` may not assert the pin's own `observed`
+  outcome (`attempt-asserts-observed` FAIL; structural similarity
+  warns), may not be tautological (`attempt-tautological` FAIL —
+  self-comparisons, `(str, type(None))` return-union isinstance,
+  `or True`, bare `pass`, constant-true asserts), and every
+  `result: pass` pin must carry a verbatim `clause_absent:` quote
+  from the docs/source region where a covering clause would live
+  (`pass-pin-no-justification` FAIL). `clause_absent` is verified
+  against the SOURCE TREE ONLY — interpolated `...` ellipses
+  (`clause-absent-interpolated` FAIL), duplicating `clause_quote`
+  (`clause-absent-equals-quote` FAIL), and text absent from the
+  source (`quote-not-in-source` FAIL) are rejected; quoting your
+  own design doc is self-certification. The quote must also be
+  PROSE from the pinned unit's own docstring/Javadoc span —
+  a `def`/`class`/`import`/assignment/signature line is
+  `clause-absent-code` FAIL, and prose verbatim in a DIFFERENT
+  unit's docstring is `clause-absent-wrong-unit` FAIL (laundered
+  provenance: quoting a sibling function's identical Args line
+  proves nothing about this unit's silence). Prose outside every
+  docstring span is legal only as an explicit
+  'unspecified/not documented' statement or with a declared
+  `unit:`/`docs_unit:` attribution matching the pin's unit.
+  `observed` claims of an
+  uncaught exception are probe-executed — if the pinned call
+  returns normally or raises a different type, that is
+  `observed-mismatch` FAIL, and a passing attempt that asserts a
+  return value while `observed` claims a raise is
+  `attempt-contradicts-observed` FAIL. Finally, the pin x flag
+  join: a pin whose unit and input both appear in any
+  `test_suspected_defects_*` file is `flag-pin-contradiction`
+  FAIL — the same unit+input cannot be spec-silent and defective
+  at once; re-verdict one side.
+- **Expected-literal provenance (mandatory):** every expected
+  value in a green assert is either clause-derived or
+  observed — there is no third source. Before shipping, mark
+  each parametrized expected column: literals DERIVED from a
+  covering clause vs literals ADOPTED from running the impl.
+  An adopted literal is an observed-behavior pin in substance
+  regardless of where it sits — a decision-table row, an EP
+  rep, a "rule" test — and takes the full pin-proof whenever
+  a covering clause's entailed literal differs. The pin rules
+  attach to the literal's provenance, not the test's label:
+  minting a probed divergence as an ordinary expected value
+  launders it out of every verdict rule.
+  A zero-flag run on code with any documented
   clause is a red flag in itself: prove in §5 that every
   single clause was tried and passed, or the run is
   laundered. This is a checklist item in self-review, not
@@ -327,9 +429,9 @@ naming the category.
   "Spec-silent" describes an absent contract, not a
   violated one — pinning a written-clause violation
   green is evasion, not characterization. You may ALSO
-  pin the observed behavior alongside the flag (flag the
-  dead clause AND pin what it does), but the flag is
-  mandatory. Reserve spec-silent pins for inputs the
+  A divergent outcome is NEVER a green expected value:
+  do not "also pin" the observed — the flag IS the
+  disposition. Reserve spec-silent pins for inputs the
   docs truly don't cover.
 - **Defect-family completeness (mandatory):** when a divergence
   mechanism is found on one input, enumerate EVERY input in scope
@@ -414,11 +516,101 @@ naming the category.
   that greps false is itself a defect.
   A claim you cannot reproduce does not ship — fix the test
   or fix the claim.
-- **Cross-file literal-dup sweep:** after emission, diff each
-  file's parametrized rows against every other file's — the same
-  input + same assertion pair may not appear twice even under
-  different test names (fold the second obligation into the first
-  test's covers).
+- **Pin manifest (mandatory, machine-auditable):** the ledger
+  (ledger.json, rendered into the fenced block) must carry a
+  `pins:` list — one entry per spec-silent/
+  observed-behavior pin — with fields: `id`, `unit`, `input`
+  (the discriminating member literal), `observed` (the pinned
+  outcome), `clause_quote` (verbatim doc text proving silence),
+  `clause_absent` (verbatim docs/source quote for the region where a
+  covering clause would live — mandatory when `result: pass`),
+  `conforming_attempt` — a STRUCTURED result
+  {tried: <flag assertion>, result: pass|fail}. A pin whose
+  attempt result is `fail` is VERDICT-BINDING: the impl does
+  not do the conforming thing — that pin must be re-verdicted
+  flag-or-qfm, never shipped as a pin. `result: pass` attempts
+  must also be outcome-discriminating: not satisfied by `observed`
+  and not tautological. scripts/pin_manifest.py
+  re-checks every
+  entry against the ledger and the test files; an entry with an
+  empty attempt, a quote that greps false, an input that
+  matches a flag member, or an attempt the observed outcome would
+  satisfy is a ship-blocker. The manifest join is
+  language-aware: for Java runs every `// pin-observed:` /
+  `pin:` comment marker in the run's junit/ or staged *.java
+  tests (or --src when the run has none) must resolve to a
+  manifest id — an unmanifested marker is
+  `unmanifested-java-pin` FAIL, so a Java suite cannot hide
+  pins behind Python-only scanning. And with --src + tests the
+  checker scans green assert BODIES (r35 seal): a literal-outcome
+  assert (assertEquals/`==` pinning a str/num literal) whose
+  outcome calls only spec-silent units — project-defined but
+  undocumented, or impl-format accessors like getMessage/toString —
+  with no manifest entry covering that unit+input is
+  `unmanifested-pin` FAIL, so empty-manifest evasions like cli_r35
+  cannot pass. Type/shape checks, passthroughs, and asserts on
+  documented units are conforming, never flagged. Two outcome-side
+  seals close the pin-OUTCOME laundering channel (r36): a
+  `result: pass` pin whose `observed` is defect-shaped —
+  crash-named outcome (NPE/AssertionError/JVM Error/traceback
+  markers), malformed quoted output (doubled minus, '1
+  milliseconds' unit disagreement), or a non-str outcome where a
+  clause the pin itself cites declares a string return — is
+  `pin-defect-outcome` FAIL: spec-silent on the input class does
+  not certify the outcome, so defect-shaped outcomes must be
+  flag|qfm, never pass-pins. And `scripts/dup_sweep.py` joins
+  green assert inputs against *SuspectedDefects*/flag inputs in
+  tests/ AND junit/: an exact call-arg/argv-literal match shared
+  by a green file and a flag file is `flag-green-collision` FAIL —
+  one side asserts observed, the other conforming; they cannot
+  both be right.
+- **Checker-evidence block (mandatory in metrics.json):**
+  metrics.json must contain a `checkers:` object listing every
+  applicable checker (ledger_reconcile, oracle_lint, dup_sweep,
+  claim_reconcile, pin_manifest, boundary_audit, surface_closure,
+  guard_census)
+  with its actual stdout result or `n/a` + reason. A checker not
+  run is a ship-blocker, not a journal footnote — the verifier
+  reads this block, not your prose.
+- **Door census as data (mandatory):** the ledger (ledger.json,
+  rendered into the fenced block) must
+  carry a `doors:` list — one row per enumerated
+  discriminating door {unit, clause_id, member, disposition}
+  — so enumeration breadth is machine-joinable, not prose.
+  A door with disposition `missed`/`unwitnessed` is counted
+  against the breadth floor exactly like a missed cell.
+- **Mandatory verifier_findings key:** metrics.json MUST
+  contain a `verifier_findings:` object (even `mode:
+  "delegated", findings: 0`); its ABSENCE is itself a
+  ship-blocker — an absent key cannot be distinguished
+  from a skipped verifier.
+- **Pre-delivery verifier (mandatory stage):** before shipping,
+  dispatch the suite to an independent verifier — DELEGATE to a
+  fresh agent; self-verification is allowed only as a documented
+  capacity-collapse fallback logged in metrics.json
+  `verifier_findings:` — the verifier that: (1) runs every applicable
+  checker on the shipped files; (2) re-probes every `pins:`
+  entry's conforming_attempt claim; (3) runs the cross-verdict
+  intersection (flag members x green-assert inputs — any overlap
+  is a defect); (4) counts units with zero witnesses against the
+  door census. Self-review cannot substitute: the agent that
+  minted a pin does not re-adjudicate it honestly. Ship only on
+  a clean verifier report, or log each unresolved finding in
+  metrics.json `verifier_findings:` with its disposition.
+- **Cross-file literal-dup + cross-verdict sweep:** after
+  emission, diff each file's parametrized rows against every
+  other file's — the same input + same assertion pair may not
+  appear twice even under different test names (fold the second
+  obligation into the first test's covers). The same-input index
+  must INCLUDE the flag file: an input appearing under a red
+  flag AND under any green assert is a contradiction by
+  default — a divergent outcome is never a green expected
+  value, so a same-input flag/green pair means one of the
+  two encodes the wrong verdict. The only legal overlap is
+  a green assert on a DIFFERENT clause's conforming
+  outcome, cited in §5; a green row asserting the observed
+  outcome the sibling flag calls defective is a
+  self-contradiction — resolve before shipping.
 - **Cross-section fold (no duplicate witnesses):** when two
   artifacts name the same discriminating input — an axis row
   whose spelling is already a decision-table member, a boundary
@@ -458,8 +650,9 @@ naming the category.
   dedicated file (test_suspected_defects.*), hard assertions with an
   issue-style docstring — ONE flag per root cause: when the same
   defect mechanism manifests at several entry points, flag the most
-  discriminating door and pin the sibling doors as green
-  observed-behavior (with the fold recorded in the ledger). The
+  discriminating door and add the sibling doors as MEMBERS of
+  that flag's own parametrize rows — siblings are flag
+  members, never green pins. The
   ONLY split permitted inside a root cause is the differential
   boundary — when instances differ on whether a plausible fix
   would repair them.
@@ -476,7 +669,21 @@ naming the category.
   produces stays red on a conforming impl — a broken oracle that
   detects nothing; a flag asserting behavior the docs explicitly
   document is a false flag. Both are worse than a miss: they burn
-  flag budget and impeach every sibling flag. Flags MUST be
+  flag budget and impeach every sibling flag. A clause-entailed
+  literal is necessary, not sufficient: for a CONDITIONAL clause
+  — a raise/return conditioned on a trigger ("raises X if COND") —
+  the flag member must satisfy the clause's stated condition,
+  verified by probing the condition expression itself before
+  shipping (run the predicate, encoding, or check the clause names
+  on the member; never assume a member "looks triggering"). A
+  member outside the trigger domain makes the clause owe nothing —
+  the flag fails for an unrelated reason and stays red on a
+  conforming impl: a vacuous flag, the same class as a broken
+  oracle. When the observed failure arrives via the clause's named
+  type, confirm the clause's mechanism produced it — inspect the
+  error's site/reason/args, not merely its type. A flag whose
+  member does not reach the named mechanism does not ship — mint
+  the member that does, or the door is a miss, not a flag. Flags MUST be
   plain failing assertions on the defective implementation: never
   xfail, skip, or expect-failure marks — packaging a violation as an
   expected outcome makes the suite report it as passing and
@@ -506,7 +713,21 @@ naming the category.
   observed behavior and takes the full pin-proof (conforming-
   flag attempt first, mental-fix, verbatim evidence). A pin
   justified only by "the docs don't enumerate this exception"
-  is an unproven pin. If no clause entails the
+  is an unproven pin. The outside-domain carve-out is itself
+  bounded: a contract that enumerates the COMPLETE outcome set
+  for every call — an outcome partition ("returns A or raises
+  B"), not a happy-path sentence — binds EVERY input the
+  function accepts: an outcome outside the enumerated set on
+  any input, including wrong-type and edge members outside
+  each parameter's declared domain, is a flag door, because
+  the enumeration's domain is every call, not every in-domain
+  call. Similarly, when a documented CAPABILITY is unreachable
+  — the documented operation fails on every member of its
+  documented happy-path domain — the conforming-flag attempt
+  is the happy-path call succeeding; if it fails, the
+  unreachable capability is itself the flag door, and a pin
+  of the observed failure type evades it even when that type
+  IS the documented raise. If no clause entails the
   flag, disposition it as an ambiguity/design-gap, not a defect.
   Annotations,
   inferred domains, and conventions are non-citable: they inform
@@ -515,6 +736,18 @@ naming the category.
   type alone. A rule invented by the runner (not in the spec,
   types, or impl's documented contract) is a manufactured rule,
   not a defect.
+- **Probe matrix (mandatory, per public unit):** every public unit's
+  member enumeration MUST include wrong-type members across the
+  standard input classes — int/str/list/tuple/dict/set/None/bool/
+  bytes for Python (null/wrong-primitive/wrong-String for Java) —
+  plus null/zero/negative/boundary/deprecated-path members. The
+  signature constrains which classes are "wrong", never whether to
+  probe them: annotations bound what to TRY, not what may be fed.
+  Ledger members must reflect the matrix — a unit whose members are
+  all in-domain (e.g. str-only probes on a str-typed API) is an
+  enumeration gap, not a typed suite. guard_census.py joins this:
+  a public unit with ledger members but no type-class member at all
+  is a `wrong-type-gap` FAIL.
 - **Entry-point x input-class closure (Phase 2, BEFORE decomposition):**
   build a CLASS REGISTRY first: each domain rule (grammar
   productions, type-conversion contracts, magic-method/protocol
@@ -557,9 +790,10 @@ naming the category.
   either exist in TEST_DESIGN or be dispositioned with a reason —
   an absent artifact with no disposition is a failed self-review.
 - **No-cell-veto:** a defect flag cannot remove a closure/registry
-  cell. When doc and impl disagree, emit BOTH the pinned-behavior
-  test and the defect flag — the suite's green pins stay
-  representative of observable behavior.
+  cell. When doc and impl disagree, emit the defect flag —
+  a divergent outcome is never a green expected value, so
+  there is no "also pin" of the defective behavior; the
+  flag alone witnesses the door.
 - **Field x consumer matrix (Phase 2, BEFORE any decomposition):**
   for every stateful/semantic type, build a table of stored fields x
   semantic consumers (equality, ordering, hashing, serialization,
@@ -649,10 +883,23 @@ naming the category.
   category estimates and cell counts before folds are inputs, never
   authorities. Emitted count must equal the ledger total; the
   budget table's rows must sum to it.
-  The ledger must ALSO be emitted as a machine-readable fenced
-  ```ledger YAML block inside TEST_DESIGN.md (member census —
-  reverse reconciliation: enumerate first, tag each member, so a
-  drop BETWEEN enumeration and emission is countable):
+  The ledger is machine-authored — NEVER hand-written (a
+  truncated hand-edited block silently loses sections). Build it
+  by appending to runs/<run>/ledger.json with
+  scripts/ledger_entry.py, one call per entry (atomic write +
+  per-entry schema validation on every call; `budget` is derived
+  from the witness count so it cannot go stale):
+    ledger_entry.py RUN_DIR add-obligation --json '{"id": "...", "kind": "..."}'
+    ledger_entry.py RUN_DIR add-member     --json '{"obligation": "...", "member": "..."}'
+    ledger_entry.py RUN_DIR add-witness    --json '{"test": "...", "covers": [{"obligation": "...", "members": ["..."]}]}'
+    ledger_entry.py RUN_DIR add-fold       --json '{"obligation": "...", "member": "...", "fold_into": "...", "reason": "..."}'
+    ledger_entry.py RUN_DIR add-pin        --json '{"id": "...", "unit": "...", "input": "...", "clause_absent": "...", "conforming_attempt": {"tried": "...", "result": "pass"}}'
+    ledger_entry.py RUN_DIR add-door       --json '{"unit": "...", "member": "...", "clause_id": "...", "disposition": "..."}'
+  TEST_DESIGN.md embeds the RENDERED snapshot —
+  `ledger_entry.py RUN_DIR render` emits the fenced ```ledger
+  YAML block (member census — reverse reconciliation: enumerate
+  first, tag each member, so a drop BETWEEN enumeration and
+  emission is countable):
     obligations: [{id, kind, members: [...]}]  # members = DOMAIN
                                               # members enumerated at
                                               # model time (class
@@ -665,7 +912,14 @@ naming the category.
                                               # tautological
     witnesses:  [{test, covers: [{obligation, members: [...]}]}]
     folds:      [{obligation, member, fold_into, reason}]
-    budget: N
+    pins:       [...]   doors: [...]   budget: N
+  The snapshot is generated output — paste render output
+  verbatim, never hand-edit it (ledger_reconcile reads
+  ledger.json when it exists and treats the fenced block only
+  as the backcompat fallback: unparseable JSON or stray
+  fragments are `ledger-corrupt`, an absent section is
+  `ledger-missing-section`, an under-fielded entry is
+  `entry-schema`).
   Run scripts/ledger_reconcile.py TEST_DESIGN.md — it joins at MEMBER
   granularity: every member must be witnessed or folded;
   a member in neither is a hole; a test covering no obligation is
@@ -763,6 +1017,28 @@ pile of source you'd have to re-read.
   defect dispositions, cross-module analysis, grading.
 - If your harness exposes a subagent mechanism
   (delegate_task, run_subagent, Agent tool), use it.
+- **Model fallback chain (when the harness offers provider
+  tiers):** launch subagents on whatever model tier your
+  orchestrator's brief names; when a subagent dies to
+  rate/spend limits, relaunch it on the next model the
+  brief names — a died subagent's partial artifacts
+  are resumable (point the replacement at its output dir,
+  not a fresh start). If EVERY tier is exhausted, stop and
+  report the collapsed units — do NOT regenerate cluster
+  work in-process: a thinned in-context suite is a worse
+  outcome than an honest capacity report, because the
+  unwitnessed doors read as misses. The orchestrator
+  resumes the run when capacity returns.
+- **Delivery is its own pass on large surfaces:** when the
+  surface is big enough that generation + integration +
+  triage might exhaust context, split the lifecycle —
+  generation produces the tests + clause/disposition work
+  files, then a FRESH delivery pass merges the ledger,
+  writes TEST_DESIGN §5 + `pins:` manifest, runs all
+  checkers, writes metrics.json, and ships. Never let
+  "tests done" masquerade as "delivery done" — an
+  unmerged ledger or absent metrics.json is a failed run,
+  not a checkpoint.
   **If none exists, you MUST simulate the same
   pattern:** one module per pass, per-module model files
   to disk (`model/<unit>.txt` — clauses, dispositions,
